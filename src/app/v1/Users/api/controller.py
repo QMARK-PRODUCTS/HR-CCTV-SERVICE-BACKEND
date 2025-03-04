@@ -1,11 +1,13 @@
 from src.database.db import get_session
-from fastapi import Depends, HTTPException, Query ,UploadFile, File
+from fastapi import Depends, HTTPException, Query ,UploadFile, File, Body, Form
 from fastapi.responses import JSONResponse, Response
 from sqlmodel import Session, select
 from typing import Annotated
 from src.app.v1.Users.models.users_models import *
 from src.app.v1.Users.serializers import *
 import shutil, os, json
+from typing import Any
+from pydantic import RootModel, BaseModel
 
 USER_STORAGE_DIR = f"{os.getenv('STORAGE_DIR', './storage')}/users/"
 
@@ -20,7 +22,7 @@ def AddNewUserModel(
         session.add(userModel)
         session.commit()
         session.refresh(userModel)
-        return JSONResponse(content={"message": "User added successfully"}, status_code=201)
+        return JSONResponse(content={"message": "User model added successfully"}, status_code=201)
     except Exception as e:
         print(e)
         return JSONResponse(content={"message": "An error occurred while adding the user"}, status_code=500)
@@ -66,25 +68,43 @@ def DeleteUserModel(
     finally:
         session.close()
         
-        
-        
-def AddNewUser(
-    name: str,
-    otherDetails: str,
-    userModelId: int,
+
+# async def AddNewUser(
+#     userModelId: int = Form(...),
+#     name: str = Form(...),
+#     image: UploadFile = File(...),
+#     otherDetails: str = Form(...)  # Accept JSON as a string
+# ):
+#     try:
+#         parsed_other_details: Dict[str, Any] = json.loads(otherDetails)  # Convert string to dict
+#     except json.JSONDecodeError:
+#         return {"error": "Invalid JSON format in otherDetails"}
+
+#     return {
+#         "userModelId": userModelId,
+#         "name": name,
+#         "image_filename": image.filename,
+#         "otherDetails": parsed_other_details,  # Now correctly parsed as a dictionary
+#     }
+async def AddNewUser(
     session: SessionDep,
+    userModelId: int = Form(...),
+    name: str = Form(...),
     image: UploadFile = File(...),
+    otherDetails: str = Form(...),
 ) -> JSONResponse:
     
     try:
-        # Convert otherDetails from JSON string to dictionary
+        
+        if not name or not userModelId:
+            return JSONResponse(content={"message": "Missing required fields"}, status_code=400)
+
         try:
-            otherDetails_dict = json.loads(otherDetails) if isinstance(otherDetails, str) else otherDetails
+            otherDetails_dict: Dict[str, Any] = json.loads(otherDetails)
         except json.JSONDecodeError:
             return JSONResponse(content={"message": "Invalid JSON format in otherDetails"}, status_code=400)
 
         print("Parsed otherDetails:", otherDetails_dict)
-        print("Type of otherDetails:", type(otherDetails_dict))
 
         # 1. Check if UserModel exists
         user_model = session.exec(select(UserModel).where(UserModel.id == userModelId)).first()
@@ -104,7 +124,7 @@ def AddNewUser(
                     status_code=400
                 )
             
-            processed_other_details[key] = value  # If type matches, add to processed details
+            processed_other_details[key] = value
         
         # 3. Create a new User entry (without the image first to get the ID)
         new_user = User(
@@ -121,11 +141,11 @@ def AddNewUser(
         
         # 4. Create a directory for this user inside STORAGE_DIR
         user_folder = os.path.join(USER_STORAGE_DIR, str(new_user.id))
-        os.makedirs(user_folder, exist_ok=True)  # Ensure the user folder exists
+        os.makedirs(user_folder, exist_ok=True)
         
         # 5. Store image inside the user-specific folder
-        file_extension = os.path.splitext(image.filename)[-1]  # Get file extension
-        file_path = os.path.join(user_folder, f"profile{file_extension}")  # Rename to "profile"
+        file_extension = os.path.splitext(image.filename)[-1]
+        file_path = os.path.join(user_folder, f"profile{file_extension}")
         
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(image.file, buffer)
