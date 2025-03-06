@@ -69,23 +69,6 @@ def DeleteUserModel(
         session.close()
         
 
-# async def AddNewUser(
-#     userModelId: int = Form(...),
-#     name: str = Form(...),
-#     image: UploadFile = File(...),
-#     otherDetails: str = Form(...)  # Accept JSON as a string
-# ):
-#     try:
-#         parsed_other_details: Dict[str, Any] = json.loads(otherDetails)  # Convert string to dict
-#     except json.JSONDecodeError:
-#         return {"error": "Invalid JSON format in otherDetails"}
-
-#     return {
-#         "userModelId": userModelId,
-#         "name": name,
-#         "image_filename": image.filename,
-#         "otherDetails": parsed_other_details,  # Now correctly parsed as a dictionary
-#     }
 async def AddNewUser(
     session: SessionDep,
     userModelId: int = Form(...),
@@ -155,6 +138,10 @@ async def AddNewUser(
         session.add(new_user)
         session.commit()
         session.refresh(new_user)
+        
+        labels_file = os.path.join(USER_STORAGE_DIR, "labels.txt")
+        with open(labels_file, "a") as f:
+            f.write(f"{new_user.id},{new_user.name},{new_user.imageUrl}\n")
 
         return JSONResponse(content={"message": "User added successfully", "user": new_user.dict()}, status_code=201)
 
@@ -174,6 +161,17 @@ def DeleteUser(
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         
+        labels_file = os.path.join(USER_STORAGE_DIR, "labels.txt")
+        
+        if os.path.exists(labels_file):
+            with open(labels_file, "r") as file:
+                lines = file.readlines()
+            
+            with open(labels_file, "w") as file:
+                for line in lines:
+                    if not line.startswith(f"{userId},"):
+                        file.write(line)
+    
         # Delete the user's folder and all its contents
         user_folder = os.path.join(USER_STORAGE_DIR, str(user.id))
         

@@ -1,17 +1,55 @@
 import os
 import cv2
-import torch
 import numpy as np
 import asyncio
+import pickle
+import torch
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from ultralytics import YOLO
 from typing import List
+from scipy.spatial.distance import cosine
+from ultralytics import YOLO
+from facenet_pytorch import InceptionResnetV1
+from collections import deque, Counter
+import mediapipe as mp
 
-face_detector = YOLO("yolov8n-face.pt")  # Assuming YOLO face model
+VOTE_WINDOW = 10
+FRAME_SKIP = 3
+MODELS_DIR = f"{os.getenv('STORAGE_DIR', './storage')}/models/"
 
-class FaceCounter:
+face_detector = YOLO("yolov8n-face.pt")
+resnet = InceptionResnetV1(pretrained='vggface2').eval()
+mp_face_mesh = mp.solutions.face_mesh
+face_mesh = mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=10, min_detection_confidence=0.5)
+
+face_vote_memory = {}
+
+def load_face_embeddings():
+    with open(MODELS_DIR + 'allFaces.pkl', 'rb') as f:
+        return pickle.load(f)
+
+def encode(img):
+    img = torch.Tensor(img).unsqueeze(0)
+    if img.shape[1] != 3:
+        img = img.permute(0, 3, 1, 2)
+    return resnet(img)
+
+def align_face(image, landmarks, image_width, image_height):
+    left_eye = landmarks[159]
+    right_eye = landmarks[386]
+    left_eye_x, left_eye_y = int(left_eye.x * image_width), int(left_eye.y * image_height)
+    right_eye_x, right_eye_y = int(right_eye.x * image_width), int(right_eye.y * image_height)
+    
+    dY, dX = right_eye_y - left_eye_y, right_eye_x - left_eye_x
+    angle = np.degrees(np.arctan2(dY, dX)) - 180
+    
+    center = (image.shape[1] // 2, image.shape[0] // 2)
+    M = cv2.getRotationMatrix2D(center, angle, 1.0)
+    return cv2.warpAffine(image, M, (image.shape[1], image.shape[0]), flags=cv2.INTER_CUBIC)
+
+class FaceRecognition:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
+        self.all_people_faces = load_face_embeddings()
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -24,13 +62,10 @@ class FaceCounter:
         for connection in self.active_connections:
             await connection.send_json(message)
 
-face_counter = FaceCounter()
+face_recognition = FaceRecognition()
 
 async def DetectFacesWebsocket(websocket: WebSocket):
-    # Get the `source` query parameter (default to webcam "0" if not provided)
     source = websocket.query_params.get("source", "0")
-
-    # Open webcam or RTSP stream
     cap = cv2.VideoCapture(0 if source == "0" else source)
 
     if not cap.isOpened():
@@ -38,42 +73,74 @@ async def DetectFacesWebsocket(websocket: WebSocket):
         await websocket.close()
         return
 
-    await face_counter.connect(websocket)
+    await face_recognition.connect(websocket)
+    frame_count = 0
+    stable_identities = {}
 
     try:
         while True:
             ret, frame = cap.read()
             if not ret:
                 await websocket.send_json({"error": "Failed to retrieve frame."})
-                break  # Stop loop if frame retrieval fails
+                break
             
-            faces = extract_faces(frame)
-            face_count = len(faces)
-
-            # Send face count update
-            await face_counter.broadcast({"face_count": face_count})
-
-            await asyncio.sleep(0.1)  # Avoid overloading
-
+            
+            frame_count += 1
+            if frame_count % FRAME_SKIP != 0:
+                continue
+            
+            detected_faces = []
+            results = face_detector(frame)
+            
+            for result in results:
+                boxes = result.boxes.xyxy.cpu().numpy()
+                for box in boxes:
+                    x1, y1, x2, y2 = map(int, box)
+                    face = frame[y1:y2, x1:x2]
+                    
+                    rgb_face = cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
+                    results_mesh = face_mesh.process(rgb_face)
+                    if results_mesh.multi_face_landmarks:
+                        landmarks = results_mesh.multi_face_landmarks[0].landmark
+                        face = align_face(face, landmarks, face.shape[1], face.shape[0])
+                    
+                    face = cv2.resize(face, (160, 160))
+                    face = np.transpose(face, (2, 0, 1))
+                    face = (face / 255.0 - 0.5) / 0.5
+                    
+                    img_embedding = encode(face).detach().numpy().flatten()
+                    detect_dict = {k: min([cosine(v, img_embedding) for v in data["embeddings"]])
+                                   for k, data in face_recognition.all_people_faces.items() if data["embeddings"]}
+                    
+                    if not detect_dict or min(detect_dict.values()) >= 0.5:
+                        min_key, image_url, value = "Undetected", "N/A", "0.00"
+                    else:
+                        min_key = min(detect_dict, key=detect_dict.get)
+                        image_url = face_recognition.all_people_faces[min_key]["image_url"]
+                        value = face_recognition.all_people_faces[min_key].get("value", "0.00")
+                    
+                    face_id = (x1, y1, x2, y2)
+                    if face_id not in stable_identities:
+                        stable_identities[face_id] = {"label": min_key, "count": 0}
+                    
+                    if stable_identities[face_id]["label"] == min_key:
+                        stable_identities[face_id]["count"] += 1
+                    else:
+                        stable_identities[face_id] = {"label": min_key, "count": 0}
+                    
+                    if stable_identities[face_id]["count"] >= 35:
+                        stable_identities[face_id]["label"] = min_key
+                    
+                    final_label = stable_identities[face_id]["label"]
+                    detected_faces.append({"name": final_label, "image_url": image_url, "value": value})
+            
+            # Send the updated detected faces list instead of appending
+            await websocket.send_json({"detected_faces": detected_faces})
+            await asyncio.sleep(0.3)
+    
     except WebSocketDisconnect:
         print("Client disconnected.")
     finally:
-        face_counter.disconnect(websocket)
-        cap.release()  # Release video capture
+        face_recognition.disconnect(websocket)
+        cap.release()
 
-
-def extract_faces(img):
-    """Detect faces and return cropped face images."""
-    faces = []
-    results = face_detector(img)
-    
-    for result in results:
-        boxes = result.boxes.xyxy.cpu().numpy()
-        for box in boxes:
-            x1, y1, x2, y2 = map(int, box)
-            face = img[y1:y2, x1:x2]
-            face = cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
-            face = cv2.resize(face, (160, 160))
-            faces.append(face)
-    
-    return faces
