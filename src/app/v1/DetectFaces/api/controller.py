@@ -66,7 +66,8 @@ face_recognition = FaceRecognition()
 
 async def DetectFacesWebsocket(websocket: WebSocket):
     source = websocket.query_params.get("source", "0")
-    cap = cv2.VideoCapture(0 if source == "0" else source)
+    webcamFeed = f'{os.getenv("STREAMING_SERVER")}api/v1/camera-sources/webcam-video'
+    cap = cv2.VideoCapture(webcamFeed)
 
     if not cap.isOpened():
         await websocket.send_json({"error": "Unable to open video source."})
