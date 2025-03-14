@@ -7,22 +7,51 @@ from src.app.v1.CameraSources.models.camera_sources import *
 
 SessionDep = Annotated[Session, Depends(get_session)]
 
-def AddNewConnection(
-    camera_source: CameraSources, 
-    session: SessionDep
-    ) -> CameraSources:
-    
+from fastapi import HTTPException
+from sqlalchemy.orm import Session
+from fastapi.responses import JSONResponse
+
+def AddNewConnection(camera_source: CameraSources, session: SessionDep) -> CameraSources:
     try:
         if camera_source.type != "RTSP":
             raise HTTPException(status_code=400, detail="Only RTSP cameras are supported at the moment.")
         
+        if not camera_source.sourceCredentials:
+            raise HTTPException(status_code=400, detail="Source credentials are required")
+        
+        if not camera_source.sourceDetails:
+            raise HTTPException(status_code=400, detail="Source details are required")
+        
+        username = camera_source.sourceCredentials.get("username")
+        password = camera_source.sourceCredentials.get("password")
+        ip_address = camera_source.sourceDetails.get("ipAddress")
+        no_of_cameras = camera_source.sourceDetails.get("NoOfCameras")
+        
+        if not username or not password or not ip_address:
+            raise HTTPException(status_code=400, detail="Username, password and IP address are required")
+        
+        if not no_of_cameras or not isinstance(no_of_cameras, int) or no_of_cameras <= 0:
+            raise HTTPException(status_code=400, detail="Valid number of cameras is required")
+        
+        # Creating the cameras list
+        cameras = []
+        for i in range(1, no_of_cameras + 1):
+            cameras.append({
+                "name": f"Camera {i}",
+                "url": f"rtsp://{username}:{password}@{ip_address}:554/{i}"
+            })
+        
+        camera_source.sourceDetails["cameras"] = cameras  # Add cameras to sourceDetails
+        
         session.add(camera_source)
         session.commit()
         session.refresh(camera_source)
+        
         return JSONResponse(content={"message": "Camera source added successfully"}, status_code=201)
     except Exception as e:
         print(e)
         return JSONResponse(content={"message": "An error occurred while adding the camera source"}, status_code=500)
+
     
 def GetCameraSources(    
     session: SessionDep,

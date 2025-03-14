@@ -20,7 +20,6 @@ class UserCreateSchema(BaseModel):
     email: str
     password: str
     role: str
-    isActive: Optional[bool] = True
 
     class Config:
         from_attributes = True
