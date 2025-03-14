@@ -3,207 +3,217 @@ from fastapi import Depends, HTTPException, Query ,UploadFile, File, Body, Form
 from fastapi.responses import JSONResponse, Response
 from sqlmodel import Session, select
 from typing import Annotated
-from src.app.v1.Users.models.users_models import *
-from src.app.v1.Users.serializers import *
-import shutil, os, json
-from typing import Any
-from pydantic import RootModel, BaseModel
+from src.app.v1.Users.models.models import *
+from passlib.context import CryptContext
+from ..services.auth import *
+from src.app.v1.Users.schemas import *
+from src.config.variables import SECRET_KEY
 
-USER_STORAGE_DIR = f"{os.getenv('STORAGE_DIR', './storage')}/users/"
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def hashPassword(password: str) -> str:
+
+    return pwd_context.hash(password + SECRET_KEY)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+
+    try:
+        return pwd_context.verify(plain_password + SECRET_KEY, hashed_password)
+    except Exception as e:
+        print(e)
+        return False
 
 SessionDep = Annotated[Session, Depends(get_session)]
 
-def AddNewUserModel(
-    userModel: UserModel,
-    session: SessionDep
+def AddNewUser(
+    user: UserCreateSchema, 
+    db: Session = Depends(get_session)
     ) -> JSONResponse:
     
     try:
-        session.add(userModel)
-        session.commit()
-        session.refresh(userModel)
-        return JSONResponse(content={"message": "User model added successfully"}, status_code=201)
-    except Exception as e:
-        print(e)
-        return JSONResponse(content={"message": "An error occurred while adding the user"}, status_code=500)
-    
+        existing_users = db.exec(select(Users).where(Users.email == user.email)).all()
+        if existing_users:
+            raise HTTPException(status_code=400, detail="User already exists")
+        
+        total_users = db.exec(select(Users)).all()
 
-def GetUserModels(
-    session: SessionDep,
-    offset: int = 0,
-    limit: Annotated[int, Query(le=100)] = 100,
-    ) -> list[UserModel]:
-    
-    try:
-        
-        user_models = session.exec(select(UserModel).offset(offset).limit(limit)).all()
-        
-        user_models_data = [user.model_dump() for user in user_models]
-        
-        return JSONResponse(content={"result": user_models_data}, status_code=200)
-    except Exception as e:
-        print(e)
-        return JSONResponse(content={"message": "An error occurred while fetching the user models"}, status_code=500)
-    finally:
-        session.close()
-        
-def DeleteUserModel(
-    userModelId: int,
-    session: SessionDep
-    ) -> JSONResponse:
-    
-    try:
-        user_model = session.query(UserModel).filter(UserModel.id == userModelId).first()
-        
-        if not user_model:
-            raise HTTPException(status_code=404, detail="User model not found")
-        
-        session.delete(user_model)
-        session.commit()
-        
-        return JSONResponse(content={"message": "User model deleted successfully"}, status_code=200)
-    except Exception as e:
-        print(e)
-        return JSONResponse(content={"message": "An error occurred while deleting the user model"}, status_code=500)
-    finally:
-        session.close()
-        
+        # Set role and password based on conditions
+        if not total_users:
+            role = "admin"
+            is_active = True
+            password = hashPassword(user.password)
+        elif not user.role or user.role not in ["admin", "moderator"]:
+            role = "moderator"
+            is_active = False
+            password = None  # Don't store an empty string as a password
+        else:    
+            role = user.role
+            is_active = True
+            password = hashPassword(user.password)
 
-async def AddNewUser(
-    session: SessionDep,
-    userModelId: int = Form(...),
-    name: str = Form(...),
-    image: UploadFile = File(...),
-    otherDetails: str = Form(...),
-) -> JSONResponse:
-    
-    try:
-        
-        if not name or not userModelId:
-            return JSONResponse(content={"message": "Missing required fields"}, status_code=400)
-
-        try:
-            otherDetails_dict: Dict[str, Any] = json.loads(otherDetails)
-        except json.JSONDecodeError:
-            return JSONResponse(content={"message": "Invalid JSON format in otherDetails"}, status_code=400)
-
-        print("Parsed otherDetails:", otherDetails_dict)
-
-        # 1. Check if UserModel exists
-        user_model = session.exec(select(UserModel).where(UserModel.id == userModelId)).first()
-        if not user_model:
-            return JSONResponse(content={"message": "UserModel not found"}, status_code=404)
-        
-        # 2. Validate otherDetails data types
-        processed_other_details = {}
-        for key, value in otherDetails_dict.items():
-            if key not in user_model.otherDetails:
-                return JSONResponse(content={"message": f"Unexpected field '{key}' in otherDetails"}, status_code=400)
-
-            expected_type = type(user_model.otherDetails[key])
-            if not isinstance(value, expected_type):
-                return JSONResponse(
-                    content={"message": f"Incorrect data type for '{key}'. Expected {expected_type.__name__}, got {type(value).__name__}"},
-                    status_code=400
-                )
-            
-            processed_other_details[key] = value
-        
-        # 3. Create a new User entry (without the image first to get the ID)
-        new_user = User(
-            name=name,
-            role=user_model.role,  # Assign role from UserModel
-            otherDetails=processed_other_details,
-            imageUrl="",  # Temporary empty path
-            user_model_id=userModelId
+        # Convert Pydantic schema to ORM model
+        new_user = Users(
+            name=user.name,
+            email=user.email,
+            role=role,
+            isActive=is_active,
+            password=password
         )
-        
-        session.add(new_user)
-        session.commit()
-        session.refresh(new_user)  # Get the assigned ID after insertion
-        
-        # 4. Create a directory for this user inside STORAGE_DIR
-        user_folder = os.path.join(USER_STORAGE_DIR, str(new_user.id))
-        os.makedirs(user_folder, exist_ok=True)
-        
-        # 5. Store image inside the user-specific folder
-        file_extension = os.path.splitext(image.filename)[-1]
-        file_path = os.path.join(user_folder, f"profile{file_extension}")
-        
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(image.file, buffer)
-        
-        # 6. Update imageUrl in database
-        new_user.imageUrl = f"/api/v1/storage-operations/uploads/{new_user.id}/profile{file_extension}"
-        session.add(new_user)
-        session.commit()
-        session.refresh(new_user)
-        
-        labels_file = os.path.join(USER_STORAGE_DIR, "labels.txt")
-        with open(labels_file, "a") as f:
-            f.write(f"{new_user.id},{new_user.name},{new_user.imageUrl}\n")
 
-        return JSONResponse(content={"message": "User added successfully", "user": new_user.dict()}, status_code=201)
-
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        return JSONResponse(content={"message": "User added successfully"}, status_code=201)
     except Exception as e:
-        print("Error:", e)
+        print(e)
         return JSONResponse(content={"message": "An error occurred while adding the user"}, status_code=500)
     
     
-def DeleteUser(
-    userId: int,
-    session: SessionDep
+def CreateAdminUser(
+    user: UserCreateSchema,
+    db: Session = Depends(get_session)
     ) -> JSONResponse:
-    
     try:
-        user = session.query(User).filter(User.id == userId).first()
+        users = db.exec(select(Users)).all()
+        if users:
+            raise HTTPException(status_code=400, detail="Admin user already exists")
         
+        role = "admin"
+        isActive = True
+        password = hashPassword(user.password)
+        
+
+        new_user = Users(
+            name=user.name,
+            email=user.email,
+            role=role,
+            isActive=isActive,
+            password=password
+        )
+
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        return JSONResponse(content={"message": "Admin user added successfully"}, status_code=201)
+    except Exception as e:
+        print(e)
+        return JSONResponse(content={"message": "An error occurred while adding the admin user"}, status_code=500)
+    
+       
+def GetUsers(db: Session = Depends(get_session)):
+    try:
+        users = db.exec(select(Users)).all()
+        users_data = [UsersGetSchema.model_validate(user).model_dump(mode="json") for user in users]
+
+        return JSONResponse(content={"users": users_data}, status_code=200)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+def GetUserById(user_id: int, db: Session = Depends(get_session)):
+    try:
+        user = db.exec(select(Users).where(Users.id == user_id)).first()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         
-        labels_file = os.path.join(USER_STORAGE_DIR, "labels.txt")
+        user_data = UsersGetSchema.model_validate(user).model_dump(mode="json")
         
-        if os.path.exists(labels_file):
-            with open(labels_file, "r") as file:
-                lines = file.readlines()
-            
-            with open(labels_file, "w") as file:
-                for line in lines:
-                    if not line.startswith(f"{userId},"):
-                        file.write(line)
+        return JSONResponse(content=user_data, status_code=200)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     
-        # Delete the user's folder and all its contents
-        user_folder = os.path.join(USER_STORAGE_DIR, str(user.id))
+    
+def UpdateUser(
+    id: int,
+    updatedData: UserUpdateSchema,
+    db: Session = Depends(get_session)
+) -> JSONResponse:
+    try:
+        if updatedData.role and updatedData.role not in ["admin", "moderator"]:
+            raise HTTPException(status_code=400, detail="Invalid role")
+
+        userInstance = db.get(Users, id)
+        if not userInstance:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Debugging: Check received data
+        print(updatedData.dict(exclude_unset=True))
+
+        # Update only the fields provided in the request
+        for key, value in updatedData.dict(exclude_unset=True).items():
+            setattr(userInstance, key, value)
+
+        db.commit()
+        db.refresh(userInstance)
+
+        return JSONResponse(content={"message": "User updated successfully"}, status_code=200)
+    except Exception as e:
+        print(e)
+        db.rollback()
+        return JSONResponse(content={"message": "An error occurred while updating the user"}, status_code=500)
+    
+    
+def DeleteUser(
+    id: int,
+    db: Session = Depends(get_session)
+    ) -> JSONResponse:
+    try:
+        userInstance = db.get(Users, id)
+        if not userInstance:
+            raise HTTPException(status_code=404, detail="User not found")
         
-        if os.path.exists(user_folder):
-            shutil.rmtree(user_folder)
-        
-        session.delete(user)
-        session.commit()
+        db.delete(userInstance)
+        db.commit()
         
         return JSONResponse(content={"message": "User deleted successfully"}, status_code=200)
     except Exception as e:
         print(e)
+        db.rollback()
         return JSONResponse(content={"message": "An error occurred while deleting the user"}, status_code=500)
-    finally:
-        session.close()
-        
-        
-def GetUsers(
-    session: SessionDep,
-    offset: int = 0,
-    limit: Annotated[int, Query(le=100)] = 100,
-    ) -> list[User]:
     
+    
+def AuthenticateUser(
+    authData: UserAuthSchema,
+    db: Session = Depends(get_session)
+    ) -> JSONResponse:
     try:
+        user = db.exec(select(Users).where(Users.email == authData.email)).first()
         
-        users = session.exec(select(User).offset(offset).limit(limit)).all()
+        if not user or not verify_password(authData.password, user.password):
+            raise HTTPException(status_code=401, detail="Invalid email or password")
         
-        users_data = [user.dict() for user in users]
+        access_token = CreateAccessToken(user.id)
+        refresh_token = CreateRefreshToken(user.id)
         
-        return JSONResponse(content={"result": users_data}, status_code=200)
+        return JSONResponse(content={"accessToken": access_token, "refreshToken": refresh_token}, status_code=200)
     except Exception as e:
         print(e)
-        return JSONResponse(content={"message": "An error occurred while fetching the users"}, status_code=500)
-    finally:
-        session.close()
+        return JSONResponse(content={"message": "An error occurred while authenticating the user"}, status_code=500)
+    
+    
+def RefreshAccessToken(
+    refreshData: RefreshTokenSchema,
+    db: Session = Depends(get_session)
+    ) -> JSONResponse:
+    try:
+        new_token = GenerateNewAccessToken(refreshData.refreshToken, db)
+        if not new_token:
+            return JSONResponse(content={"message": "Invalid refresh token"}, status_code=401)
+        
+        return JSONResponse(content={"accessToken": new_token}, status_code=200)
+    except Exception as e:
+        print(e)
+        return JSONResponse(content={"message": "An error occurred while refreshing the access token"}, status_code=500)
+    
+    
+def ValidateAccessToken(
+    token: str
+    ) -> JSONResponse:
+    try:
+        payload = ValidateToken(token)
+        if payload and payload.get('userId'):
+            return JSONResponse(content={"message": "Valid token"}, status_code=200)
+        else:
+            return JSONResponse(content={"message": "Invalid token"}, status_code=401)
+    except Exception as e:
+        print(e)
+        return JSONResponse(content={"message": "An error occurred while validating the token"}, status_code=500)

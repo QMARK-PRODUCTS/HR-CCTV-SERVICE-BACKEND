@@ -6,6 +6,7 @@ from src.database.db import DATABASE_URL
 from alembic import context
 from sqlmodel import SQLModel
 import src.app.v1.CameraSources.models
+import src.app.v1.People.models
 import src.app.v1.Users.models
 
 # this is the Alembic Config object, which provides

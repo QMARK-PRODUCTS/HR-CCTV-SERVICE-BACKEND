@@ -2,7 +2,7 @@ from fastapi import Form
 from typing import Dict
 from pydantic import BaseModel
 
-class UserCreateSerializer(BaseModel):
+class PeopleCreateSerializer(BaseModel):
     name: str
     otherDetails: Dict[str, any]  # Ensure otherDetails is a dictionary
 

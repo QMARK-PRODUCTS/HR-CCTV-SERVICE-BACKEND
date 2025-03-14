@@ -2,6 +2,7 @@ from sqlmodel import create_engine, SQLModel, Session
 import os
 from dotenv import load_dotenv
 import src.app.v1.CameraSources.models
+import src.app.v1.People.models
 import src.app.v1.Users.models
 
 load_dotenv()

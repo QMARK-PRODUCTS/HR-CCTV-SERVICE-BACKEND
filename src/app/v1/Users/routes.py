@@ -5,28 +5,28 @@ router = APIRouter()
 
 routes = [
     {
-        "route": "/model",
-        "method": ["POST"],
-        "handler": AddNewUserModel,
-        "name": "Add new user model"
-    },
-    {
-        "route": "/model",
-        "method": ["GET"],
-        "handler": GetUserModels,
-        "name": "Get user models"
-    },
-    {
-        "route": "/model/{userModelId}",
-        "method": ["DELETE"],
-        "handler": DeleteUserModel,
-        "name": "Delete user model"
-    },
-    {
         "route": "",
         "method": ["POST"],
         "handler": AddNewUser,
         "name": "Add new user"
+    },
+    {
+        "route": "/admin",
+        "method": ["POST"],
+        "handler": CreateAdminUser,
+        "name": "Create admin"
+    },
+    {
+        "route": "/login",
+        "method": ["POST"],
+        "handler": AuthenticateUser,
+        "name": "Login"
+    },
+    {
+        "route": "",
+        "method": ["PUT"],
+        "handler": UpdateUser,
+        "name": "Update user"
     },
     {
         "route": "",
@@ -36,9 +36,27 @@ routes = [
     },
     {
         "route": "/{userId}",
+        "method": ["GET"],
+        "handler": GetUserById,
+        "name": "Get user"
+    },
+    {
+        "route": "/{userId}",
         "method": ["DELETE"],
         "handler": DeleteUser,
         "name": "Delete user"
+    },
+    {
+        "route": "/refresh",
+        "method": ["POST"],
+        "handler": RefreshAccessToken,
+        "name": "Refresh Access Token"
+    },
+    {
+        "route": "/validate",
+        "method": ["POST"],
+        "handler": ValidateAccessToken,
+        "name": "Validate Access Token"
     }
 ]
 
