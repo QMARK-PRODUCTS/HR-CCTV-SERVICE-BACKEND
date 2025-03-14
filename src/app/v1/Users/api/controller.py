@@ -184,7 +184,12 @@ def AuthenticateUser(
         access_token = CreateAccessToken(user.id)
         refresh_token = CreateRefreshToken(user.id)
         
-        return JSONResponse(content={"accessToken": access_token, "refreshToken": refresh_token}, status_code=200)
+        return JSONResponse(content={
+            "accessToken": access_token, 
+            "refreshToken": refresh_token,
+            "name": user.name,
+            "email": user.email
+            }, status_code=200)
     except Exception as e:
         print(e)
         return JSONResponse(content={"message": "An error occurred while authenticating the user"}, status_code=500)
