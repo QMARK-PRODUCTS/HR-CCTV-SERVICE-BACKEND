@@ -28,12 +28,12 @@ routes = [
         "handler": DeleteCameraSource,
         "name": "Delete camera sources"
     },
-    {
-        "route": "/convert/",
-        "method": ["POST"],
-        "handler": convert_rtsp_to_hls,
-        "name": "Convert RTSP to HLS"
-    }
+    # {
+    #     "route": "/convert/",
+    #     "method": ["POST"],
+    #     "handler": convert_rtsp_to_hls,
+    #     "name": "Convert RTSP to HLS"
+    # }
 ]
 
 for route in routes:

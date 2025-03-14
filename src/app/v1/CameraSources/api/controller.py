@@ -4,6 +4,8 @@ from fastapi.responses import JSONResponse, Response
 from sqlmodel import Session, select
 from typing import Annotated
 from src.app.v1.CameraSources.models.camera_sources import *
+from sqlalchemy.sql.expression import cast
+from sqlalchemy.types import String
 
 SessionDep = Annotated[Session, Depends(get_session)]
 
@@ -33,16 +35,41 @@ def AddNewConnection(camera_source: CameraSources, session: SessionDep) -> Camer
         if not no_of_cameras or not isinstance(no_of_cameras, int) or no_of_cameras <= 0:
             raise HTTPException(status_code=400, detail="Valid number of cameras is required")
         
-        # Creating the cameras list
-        cameras = []
-        for i in range(1, no_of_cameras + 1):
-            cameras.append({
+        # Fetch all camera sources and check manually for existing IP
+        all_camera_sources = session.query(CameraSources).all()
+        existing_camera_source = None
+        
+        for cam in all_camera_sources:
+            if cam.sourceDetails.get("ipAddress") == ip_address:
+                existing_camera_source = cam
+                break
+        
+        # Generate the full new camera list
+        cameras = [
+            {
                 "name": f"Camera {i}",
                 "url": f"rtsp://{username}:{password}@{ip_address}:554/{i}"
-            })
+            }
+            for i in range(1, no_of_cameras + 1)
+        ]
         
+        if existing_camera_source:
+            # Replace cameras array completely
+            existing_camera_source.sourceDetails = {
+                "ipAddress": ip_address,
+                "NoOfCameras": no_of_cameras,
+                "cameras": cameras
+            }
+            print(existing_camera_source.sourceCredentials)
+            existing_camera_source.sourceCredentials = camera_source.sourceCredentials
+
+            
+            session.commit()
+            session.refresh(existing_camera_source)
+            return JSONResponse(content={"message": "Camera source updated successfully"}, status_code=200)
+        
+        # If no existing source, add a new one
         camera_source.sourceDetails["cameras"] = cameras  # Add cameras to sourceDetails
-        
         session.add(camera_source)
         session.commit()
         session.refresh(camera_source)
@@ -50,7 +77,7 @@ def AddNewConnection(camera_source: CameraSources, session: SessionDep) -> Camer
         return JSONResponse(content={"message": "Camera source added successfully"}, status_code=201)
     except Exception as e:
         print(e)
-        return JSONResponse(content={"message": "An error occurred while adding the camera source"}, status_code=500)
+        return JSONResponse(content={"message": "An error occurred while adding/updating the camera source"}, status_code=500)
 
     
 def GetCameraSources(    
@@ -70,7 +97,7 @@ def UpdateCameraSource(
     camera_id: int,
     updated_data: CameraSources,
     session: SessionDep
-    ) -> JSONResponse:
+) -> JSONResponse:
     try:
         camera_source = session.query(CameraSources).filter(CameraSources.id == camera_id).first()
         
@@ -80,14 +107,40 @@ def UpdateCameraSource(
         if updated_data.type != "RTSP":
             raise HTTPException(status_code=400, detail="Only RTSP cameras are supported at the moment.")
         
-        camera_source.type = updated_data.type
+        # Extract required details
+        username = updated_data.sourceCredentials.get("username")
+        password = updated_data.sourceCredentials.get("password")
+        ip_address = updated_data.sourceDetails.get("ipAddress")
+        no_of_cameras = updated_data.sourceDetails.get("NoOfCameras")
+
+        if not username or not password or not ip_address:
+            raise HTTPException(status_code=400, detail="Username, password, and IP address are required")
+
+        if not no_of_cameras or not isinstance(no_of_cameras, int) or no_of_cameras <= 0:
+            raise HTTPException(status_code=400, detail="Valid number of cameras is required")
+
+        # Generate updated cameras list
+        updated_cameras = [
+            {
+                "name": f"Camera {i}",
+                "url": f"rtsp://{username}:{password}@{ip_address}:554/{i}"
+            }
+            for i in range(1, no_of_cameras + 1)
+        ]
+
+        # Update only the necessary fields
         camera_source.sourceCredentials = updated_data.sourceCredentials
-        camera_source.sourceDetails = updated_data.sourceDetails
-        
+        camera_source.sourceDetails = {
+            "ipAddress": ip_address,
+            "NoOfCameras": no_of_cameras,
+            "cameras": updated_cameras  # Completely replacing the cameras array
+        }
+
         session.commit()
         session.refresh(camera_source)
-        
+
         return JSONResponse(content={"message": "Camera source updated successfully"}, status_code=200)
+
     except Exception as e:
         print(e)
         session.rollback()
