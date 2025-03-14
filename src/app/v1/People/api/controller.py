@@ -7,7 +7,6 @@ from src.app.v1.People.models.users_models import *
 from src.app.v1.People.serializers import *
 import shutil, os, json
 from typing import Any
-from pydantic import RootModel, BaseModel
 
 USER_STORAGE_DIR = f"{os.getenv('STORAGE_DIR', './storage')}/users/"
 
@@ -115,7 +114,7 @@ async def AddNewUser(
             role=user_model.role,  # Assign role from PeopleModel
             otherDetails=processed_other_details,
             imageUrl="",  # Temporary empty path
-            user_model_id=userModelId
+            people_model_id=userModelId
         )
         
         session.add(new_user)
