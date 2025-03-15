@@ -73,7 +73,7 @@ def UpdateFunction(
         function = session.query(Functions).filter(Functions.id == functionId).first()
         
         if not function:
-            raise HTTPException(status_code=404, detail="Function not found")
+            return JSONResponse(content={"message": "Function not found"}, status_code=404)
         
         function.name = updated_data.name
         function.description = updated_data.description
@@ -102,7 +102,7 @@ def DeleteFunction(
         function = session.query(Functions).filter(Functions.id == functionId).first()
         
         if not function:
-            raise HTTPException(status_code=404, detail="Function not found")
+            return JSONResponse(content={"message": "Function not found"}, status_code=404)
         
         session.delete(function)
         session.commit()

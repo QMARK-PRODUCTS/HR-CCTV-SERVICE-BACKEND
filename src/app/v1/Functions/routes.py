@@ -17,7 +17,7 @@ routes = [
         "name": "Get functions"
     },
     {
-        "route": "/{function_id}",
+        "route": "",
         "method": ["DELETE"],
         "handler": DeleteFunction,
         "name": "Delete function"
