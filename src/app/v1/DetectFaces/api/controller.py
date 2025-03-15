@@ -81,10 +81,9 @@ face_recognition = FaceRecognition()
 
 async def DetectFacesWebsocket(websocket: WebSocket):
     source = websocket.query_params.get("source", "0")
-    # cap = cv2.VideoCapture(f'{os.getenv("STREAMING_SERVER")}api/v1/camera-sources/webcam-video')
-    if source == "0":
-        source = f'{os.getenv("STREAMING_SERVER")}api/v1/camera-sources/webcam-video'
-    cap = cv2.VideoCapture(source)
+    webcamFeed = f'{os.getenv("STREAMING_SERVER")}api/v1/camera-sources/webcam-video'
+    cap = cv2.VideoCapture(webcamFeed)
+
     if not cap.isOpened():
         await websocket.send_json({"error": "Unable to open video source."})
         await websocket.close()
@@ -93,7 +92,6 @@ async def DetectFacesWebsocket(websocket: WebSocket):
     await face_recognition.connect(websocket)
     frame_count = 0
     stable_identities = {}
-    people_detected_start = None  # Timestamp for tracking
 
     try:
         while True:
@@ -101,59 +99,61 @@ async def DetectFacesWebsocket(websocket: WebSocket):
             if not ret:
                 await websocket.send_json({"error": "Failed to retrieve frame."})
                 break
-
+            
+            
             frame_count += 1
             if frame_count % FRAME_SKIP != 0:
                 continue
-
+            
             detected_faces = []
             results = face_detector(frame)
-
+            
             for result in results:
                 boxes = result.boxes.xyxy.cpu().numpy()
                 for box in boxes:
                     x1, y1, x2, y2 = map(int, box)
                     face = frame[y1:y2, x1:x2]
-
+                    
                     rgb_face = cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
                     results_mesh = face_mesh.process(rgb_face)
                     if results_mesh.multi_face_landmarks:
                         landmarks = results_mesh.multi_face_landmarks[0].landmark
                         face = align_face(face, landmarks, face.shape[1], face.shape[0])
-
+                    
                     face = cv2.resize(face, (160, 160))
                     face = np.transpose(face, (2, 0, 1))
                     face = (face / 255.0 - 0.5) / 0.5
-
+                    
                     img_embedding = encode(face).detach().numpy().flatten()
                     detect_dict = {k: min([cosine(v, img_embedding) for v in data["embeddings"]])
                                    for k, data in face_recognition.all_people_faces.items() if data["embeddings"]}
-
+                    
                     if not detect_dict or min(detect_dict.values()) >= 0.5:
                         min_key, image_url, value = "Undetected", "N/A", "0.00"
                     else:
                         min_key = min(detect_dict, key=detect_dict.get)
                         image_url = face_recognition.all_people_faces[min_key]["image_url"]
                         value = face_recognition.all_people_faces[min_key].get("value", "0.00")
-
+                    
                     face_id = (x1, y1, x2, y2)
                     if face_id not in stable_identities:
                         stable_identities[face_id] = {"label": min_key, "count": 0}
-
+                    
                     if stable_identities[face_id]["label"] == min_key:
                         stable_identities[face_id]["count"] += 1
                     else:
                         stable_identities[face_id] = {"label": min_key, "count": 0}
-
+                    
                     if stable_identities[face_id]["count"] >= 35:
                         stable_identities[face_id]["label"] = min_key
-
+                    
                     final_label = stable_identities[face_id]["label"]
                     detected_faces.append({"name": final_label, "image_url": image_url, "value": value})
-
-            await websocket.send_json({"detected_faces": detected_faces})
             
-
+            # Send the updated detected faces list instead of appending
+            await websocket.send_json({"detected_faces": detected_faces})
+            await asyncio.sleep(0.3)
+    
     except WebSocketDisconnect:
         print("Client disconnected.")
     finally:
