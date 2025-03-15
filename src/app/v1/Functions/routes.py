@@ -1,0 +1,34 @@
+from fastapi import APIRouter
+from src.app.v1.Functions.api.controller import *
+
+router = APIRouter()
+
+routes = [
+    {
+        "route": "",
+        "method": ["POST"],
+        "handler": AddNewFunction,
+        "name": "Add new function"
+    },
+    {
+        "route": "",
+        "method": ["GET"],
+        "handler": GetFunctions,
+        "name": "Get functions"
+    },
+    {
+        "route": "/{function_id}",
+        "method": ["DELETE"],
+        "handler": DeleteFunction,
+        "name": "Delete function"
+    },
+    {
+        "route": "/{function_id}",
+        "method": ["PUT"],
+        "handler": UpdateFunction,
+        "name": "Update function"
+    }
+]
+
+for route in routes:
+    router.add_api_route(route["route"], route["handler"], methods=route["method"], name=route["name"])

@@ -9,9 +9,6 @@ from sqlalchemy.types import String
 
 SessionDep = Annotated[Session, Depends(get_session)]
 
-from fastapi import HTTPException
-from sqlalchemy.orm import Session
-from fastapi.responses import JSONResponse
 
 def AddNewConnection(camera_source: CameraSources, session: SessionDep) -> CameraSources:
     try:

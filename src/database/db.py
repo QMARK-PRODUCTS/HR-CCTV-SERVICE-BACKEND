@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 import src.app.v1.CameraSources.models
 import src.app.v1.People.models
 import src.app.v1.Users.models
+import src.app.v1.Functions.models
 
 load_dotenv()
 
