@@ -4,12 +4,43 @@ from fastapi.responses import JSONResponse, Response
 from sqlmodel import Session, select
 from typing import Annotated
 from src.app.v1.Functions.models.models import *
+from src.app.v1.StorageOperations.models.models import *
 from sqlalchemy.sql.expression import cast
 from sqlalchemy.types import String
 from ..schemas import *
 
 SessionDep = Annotated[Session, Depends(get_session)]
 
+def GetFunctionRecordings(
+    functionId: int,
+    session: SessionDep
+) -> JSONResponse:
+    try:
+        print("Function ID: ", functionId)
+        function = session.query(Functions).filter(Functions.id == functionId).first()
+        
+        if not function:
+            return JSONResponse(content={"message": "Function not found"}, status_code=404)
+        
+        print("Function: ", function)
+        recordings = session.exec(select(FunctionRecordings).where(FunctionRecordings.function_id == functionId)).all()
+        
+        recordings_data = [
+            {
+                **recording.model_dump(),
+                "created_at": recording.created_at.isoformat()  # Convert datetime to string
+            }
+            for recording in recordings
+        ]
+        
+        return JSONResponse(content={"result": recordings_data}, status_code=200)
+    
+    except Exception as e:
+        print(e)
+        return JSONResponse(content={"message": "An error occurred while fetching the recordings"}, status_code=500)
+    
+    finally:
+        session.close()
 
 def AddNewFunction(
     function_data: FunctionsCreateSchema, session: SessionDep

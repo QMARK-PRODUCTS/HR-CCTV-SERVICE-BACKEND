@@ -15,6 +15,8 @@ from src.app.v1.Functions.models.models import FunctionInfo
 import mediapipe as mp
 from datetime import datetime
 from src.database.db import get_session
+from sqlalchemy.orm import Session
+from src.app.v1.StorageOperations.models.models import FunctionRecordings
 
 VOTE_WINDOW = 10
 FRAME_SKIP = 3
@@ -151,32 +153,6 @@ async def DetectFacesWebsocket(websocket: WebSocket):
 
             await websocket.send_json({"detected_faces": detected_faces})
             
-            # Count number of people detected
-            people_count = len(detected_faces)
-
-            if people_count >= 1:
-                loop = asyncio.get_running_loop()  # Get the event loop
-
-                if people_detected_start is None:
-                    people_detected_start = loop.time()  # Initialize start time
-
-                elapsed_time = loop.time() - people_detected_start  # Calculate elapsed time
-
-                if elapsed_time >= 5:
-                    message = json.dumps({"timestamp": int(loop.time()), "people_count": people_count})
-                    
-                    try:
-                        rabbitmq_channel.basic_publish(exchange="", routing_key="face_notifications", body=message)
-                        print("Sent message to RabbitMQ:", message)  # Debugging output
-                    except Exception as e:
-                        print("RabbitMQ Error:", str(e))  # Catch RabbitMQ errors
-
-                    people_detected_start = None  # Reset timer after sending
-
-            else:
-                people_detected_start = None  # Reset if no people are detected
-
-            await asyncio.sleep(0.3)
 
     except WebSocketDisconnect:
         print("Client disconnected.")
@@ -185,7 +161,7 @@ async def DetectFacesWebsocket(websocket: WebSocket):
         cap.release()
 
 
-async def DetectFacesBackground(func, session):
+async def DetectFacesBackground(func, session: Session):
     """Detect faces from a camera source and handle recording + notification"""
     source = func.camerasAssigned.get("cameras", "0")
     if source == "0" or source == []:
@@ -266,7 +242,7 @@ async def DetectFacesBackground(func, session):
 
                     if func.saveRecordings and not recording:
                         file_name = f"{func.name}_{int(datetime.now().timestamp())}.mp4"
-                        file_path = os.path.join("storage", "recordings", file_name)
+                        file_path = os.path.abspath(os.path.join("storage", "recordings", file_name))
                         os.makedirs(os.path.dirname(file_path), exist_ok=True)
                         
                         if frame.shape[0] > 0 and frame.shape[1] > 0:
@@ -291,7 +267,22 @@ async def DetectFacesBackground(func, session):
                         recording = False
                         out = None
                         recording_start_time = None
-                
+
+                        # Save to DB
+                        new_recording = FunctionRecordings(
+                            function_id=func.id,
+                            timestamp=datetime.now().isoformat(),
+                            recording=file_path,
+                            people_count=people_count,
+                            created_at=datetime.now()
+                        )
+                        try:
+                            loop.run_in_executor(None, lambda: session.add(new_recording))
+                            loop.run_in_executor(None, lambda: session.commit())
+                            print(f"✅ Recording saved in DB: {file_path}")
+                        except Exception as e:
+                            print(f"⚠️ DB Save Error: {str(e)}")
+
                 people_detected_start = None
 
             people_count_log.append(people_count)

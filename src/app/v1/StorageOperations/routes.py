@@ -9,6 +9,12 @@ routes = [
         "method": ["GET"],
         "handler": GetUserImage,
         "name": "Get User Image"
+    },
+    {
+        "route": "/function-recordings/{function_id}",
+        "method": ["GET"],
+        "handler": GetFunctionVideoStream,
+        "name": "Get Function Recording"
     }
 ]
 

@@ -27,6 +27,12 @@ routes = [
         "method": ["PUT"],
         "handler": UpdateFunction,
         "name": "Update function"
+    },
+    {
+        "route": "/recordings/{functionId}",
+        "method": ["GET"],
+        "handler": GetFunctionRecordings,
+        "name": "Get function recordings"
     }
 ]
 
