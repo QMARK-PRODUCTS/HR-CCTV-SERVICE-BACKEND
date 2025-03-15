@@ -5,6 +5,7 @@ import src.app.v1.CameraSources.models
 import src.app.v1.People.models
 import src.app.v1.Users.models
 import src.app.v1.Functions.models
+import src.app.v1.StorageOperations.models
 
 load_dotenv()
 
@@ -21,8 +22,7 @@ def initDB():
 def get_session():
     with Session(engine) as session:
         yield session
-    
-    
+
     
 # docker run --name test-cctv \
 #   -e MYSQL_ROOT_PASSWORD=cctv_test \

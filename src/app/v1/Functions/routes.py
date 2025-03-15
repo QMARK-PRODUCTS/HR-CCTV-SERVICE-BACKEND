@@ -23,7 +23,7 @@ routes = [
         "name": "Delete function"
     },
     {
-        "route": "/{function_id}",
+        "route": "",
         "method": ["PUT"],
         "handler": UpdateFunction,
         "name": "Update function"
