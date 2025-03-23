@@ -3,70 +3,81 @@ import pika
 import threading
 import asyncio
 import json
-
+from .notifier import Notifier
 
 # RabbitMQ connection parameters
 RABBITMQ_HOST = "localhost"
 QUEUE_NAME = "notificationsAlerts"
 
+notifier = Notifier()
+
 # Initialize RabbitMQ connection
 def get_rabbitmq_connection():
-    connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
+    connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST, port=5672))
     return connection
 
 
-async def sendMessageToQueue(data: dict):
-    connection = get_rabbitmq_connection()
-    channel = connection.channel()
-    channel.queue_declare(queue=QUEUE_NAME)
-    
-    # Publish message
-    channel.basic_publish(exchange="", routing_key=QUEUE_NAME, body=json.dumps(data))
-    connection.close()
-    
-    return {"message": "Sent successfully"}
+async def sendMessageToQueue(message: str):
+    if not notifier.is_ready:
+        await notifier.setup("test")
+    await notifier.push(
+        {
+            "timestamp": 259816,
+            "people_count": 1,
+            "message": f'{message}'
+        }
+    )
 
 # WebSocket Manager
 class ConnectionManager:
     def __init__(self):
         self.active_connections: set[WebSocket] = set()
-
+        
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.add(websocket)
+        print(f"✅ WebSocket connected! Active connections: {len(self.active_connections)}")
 
     def disconnect(self, websocket: WebSocket):
         self.active_connections.remove(websocket)
 
     async def send_message(self, message: str):
         for connection in self.active_connections:
-            await connection.send_text(message)
+            try:
+                print(f"📤 Sending to WebSocket: {message}")
+                await connection.send_text(message)
+            except Exception as e:
+                print(f"⚠️ WebSocket error: {e}")
+                self.disconnect(connection)
 
 manager = ConnectionManager()
 
 
 async def notificationWebsocket(websocket: WebSocket):
-    await manager.connect(websocket)
+    await notifier.connect(websocket)
     try:
         while True:
-            await asyncio.sleep(1)  # Keep connection alive
+            data = await websocket.receive_text()
+            await websocket.send_text(f"Message text was: {data}")
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        notifier.remove(websocket)
 
-# Consume messages from RabbitMQ and send via WebSocket
-def consume_messages():
-    connection = get_rabbitmq_connection()
-    channel = connection.channel()
-    channel.queue_declare(queue=QUEUE_NAME)
+# # Consume messages from RabbitMQ and send via WebSocket
+# def consume_messages():
+#     connection = get_rabbitmq_connection()
+#     channel = connection.channel()
+#     channel.queue_declare(queue=QUEUE_NAME)
 
-    def callback(ch, method, properties, body):
-        message = body.decode()
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(manager.send_message(message))
+#     loop = asyncio.new_event_loop()
+#     asyncio.set_event_loop(loop)  # Ensure a dedicated event loop
 
-    channel.basic_consume(queue=QUEUE_NAME, on_message_callback=callback, auto_ack=True)
-    channel.start_consuming()
+#     def callback(ch, method, properties, body):
+#         message = body.decode()
+#         print(f"📩 Received from RabbitMQ: {message}")  # Debug
+#         loop.call_soon_threadsafe(asyncio.create_task, manager.send_message(message))
 
-# Run RabbitMQ consumer in a background thread
-threading.Thread(target=consume_messages, daemon=True).start()
+#     channel.basic_consume(queue=QUEUE_NAME, on_message_callback=callback, auto_ack=True)
+#     print("🔄 Listening for messages...")
+#     channel.start_consuming()
+
+# threading.Thread(target=consume_messages, daemon=True).start()

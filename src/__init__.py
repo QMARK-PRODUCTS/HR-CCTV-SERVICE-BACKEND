@@ -49,28 +49,28 @@ async def schedule_functions():
 
         await asyncio.sleep(60)
         
-# @asynccontextmanager
-# async def lifespan(app: FastAPI):
-#     initDB()  # Initialize the database
-
-#     yield
-    
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     initDB()  # Initialize the database
 
-    # Start the face detection scheduling task
-    loop = asyncio.get_event_loop()
-    face_detection_task = loop.create_task(schedule_functions())
+    yield
+    
+# @asynccontextmanager
+# async def lifespan(app: FastAPI):
+#     initDB()  # Initialize the database
 
-    yield  # Server runs here
+#     # Start the face detection scheduling task
+#     loop = asyncio.get_event_loop()
+#     face_detection_task = loop.create_task(schedule_functions())
 
-    # Cleanup when the app shuts down
-    face_detection_task.cancel()
-    try:
-        await face_detection_task
-    except asyncio.CancelledError:
-        pass
+#     yield  # Server runs here
+
+#     # Cleanup when the app shuts down
+#     face_detection_task.cancel()
+#     try:
+#         await face_detection_task
+#     except asyncio.CancelledError:
+#         pass
 
 app = FastAPI(
     lifespan=lifespan,

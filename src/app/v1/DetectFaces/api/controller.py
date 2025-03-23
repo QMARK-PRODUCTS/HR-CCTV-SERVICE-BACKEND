@@ -17,6 +17,7 @@ from datetime import datetime
 from src.database.db import get_session
 from sqlalchemy.orm import Session
 from src.app.v1.StorageOperations.models.models import FunctionRecordings
+from .notificationController import notifier
 
 VOTE_WINDOW = 10
 FRAME_SKIP = 3
@@ -235,9 +236,14 @@ async def DetectFacesBackground(func, session: Session):
 
                 if current_time - people_detected_start >= 7:
                     if func.notify and (current_time - last_notification_time >= 10):
-                        message = json.dumps({"timestamp": int(current_time), "people_count": people_count, "message": f"{func.name} Function has detected {people_count} people."})
+                        #message = json.dumps({"timestamp": int(current_time), "people_count": people_count, "message": f"{func.name} Function has detected {people_count} people."})
                         try:
-                            rabbitmq_channel.basic_publish(exchange="", routing_key="notificationsAlerts", body=message)
+                            if not notifier.is_ready:
+                                await notifier.setup("notificationAlerts")
+                            await notifier.push(
+                                {"timestamp": int(current_time), "people_count": people_count, "message": f"{func.name} Function has detected {people_count} people."}
+                            )
+                            #rabbitmq_channel.basic_publish(exchange="", routing_key="notificationsAlerts", body=message)
                             last_notification_time = current_time
                             print(f"📢 Notification sent at {datetime.now().isoformat()}")
                         except Exception as e:
