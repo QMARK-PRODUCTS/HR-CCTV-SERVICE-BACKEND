@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from src.app.v1.DetectFaces.api.controller import *
+from src.app.v1.DetectFaces.api.notificationController import *
 from src.app.v1.DetectFaces.Services.trainFaces import *
 router = APIRouter()
 
@@ -9,6 +10,12 @@ webSocketRoutes = [
         "method": ["WEBSOCKET"],
         "handler": DetectFacesWebsocket,
         "name": "WebSocket Face Detection"
+    },
+    {
+        "route": "/notifications",
+        "method": ["WEBSOCKET"],
+        "handler": notificationWebsocket,
+        "name": "WebSocket Notifications"
     }
 ]
 
@@ -18,6 +25,12 @@ restRoutes = [
         "method": ["POST"],
         "handler": TrainFaces,
         "name": "Train Faces"
+    },
+    {
+        "route": "/send-notification",
+        "method": ["POST"],
+        "handler": sendMessageToQueue,
+        "name": "Send Notification"
     }
 ]
 

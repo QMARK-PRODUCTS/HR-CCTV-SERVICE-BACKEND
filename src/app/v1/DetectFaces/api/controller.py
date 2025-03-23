@@ -36,7 +36,7 @@ rabbitmq_host = os.getenv("RABBITMQ_HOST", "localhost")
 
 rabbitmq_connection = pika.BlockingConnection(pika.ConnectionParameters(host="localhost"))
 rabbitmq_channel = rabbitmq_connection.channel()
-rabbitmq_channel.queue_declare(queue="face_notifications")
+rabbitmq_channel.queue_declare(queue="notificationsAlerts")
 
 def load_face_embeddings():
     with open(MODELS_DIR + 'allFaces.pkl', 'rb') as f:
@@ -181,7 +181,8 @@ async def DetectFacesBackground(func, session: Session):
     file_path = None
 
     FPS = 10  # Set a stable FPS to prevent fast playback
-
+    last_notification_time = 0
+    
     try:
         while True:
             ret, frame = cap.read()
@@ -233,10 +234,12 @@ async def DetectFacesBackground(func, session: Session):
                     people_detected_start = current_time
 
                 if current_time - people_detected_start >= 7:
-                    if func.notify:
-                        message = json.dumps({"timestamp": int(current_time), "people_count": people_count})
+                    if func.notify and (current_time - last_notification_time >= 10):
+                        message = json.dumps({"timestamp": int(current_time), "people_count": people_count, "message": f"{func.name} Function has detected {people_count} people."})
                         try:
-                            rabbitmq_channel.basic_publish(exchange="", routing_key="face_notifications", body=message)
+                            rabbitmq_channel.basic_publish(exchange="", routing_key="notificationsAlerts", body=message)
+                            last_notification_time = current_time
+                            print(f"📢 Notification sent at {datetime.now().isoformat()}")
                         except Exception as e:
                             print("RabbitMQ Error:", str(e))
 
